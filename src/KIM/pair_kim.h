@@ -111,6 +111,7 @@ namespace LAMMPS_NS {
       // values set in set_lmps_flags(), called from init_style()
       bool lmps_using_newton;
       bool lmps_using_molecular;
+      bool lmps_hybrid;
       enum unit_sys {REAL, METAL, SI, CGS, ELECTRON};
       unit_sys lmps_units;
       KIM::LengthUnit lengthUnit;
@@ -148,6 +149,9 @@ namespace LAMMPS_NS {
       int* lmps_stripped_neigh_list;  // neighbors of one atom, used when LAMMPS
                                       // is in molecular mode
       int** lmps_stripped_neigh_ptr;  // pointer into lists
+      double** lmps_force_tmp;        // temp storage for f, when running in
+                                      // hybrid mode needed to avoid reseting
+                                      // f to zero in each object
 
       // KIM specific helper functions
       virtual void set_contributing();
