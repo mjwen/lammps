@@ -69,6 +69,8 @@ get_lammps_version(${LAMMPS_SOURCE_DIR}/version.h LAMMPS_VERSION)
 # Cmake modules/macros are in a subdirectory to keep this file cleaner
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Modules)
 
+include(PreventInSourceBuilds)
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CXX_FLAGS)
   #release comes with -O3 by default
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." FORCE)
@@ -190,6 +192,8 @@ endif()
 if(PKG_MEAM OR PKG_USER-H5MD OR PKG_USER-QMMM OR PKG_USER-SCAFACOS)
   enable_language(C)
 endif()
+
+include_directories(${LAMMPS_SOURCE_DIR})
 
 # do MPI detection after language activation, if MPI for these language is required
 find_package(MPI QUIET)
@@ -450,7 +454,7 @@ endif()
 if(PKG_LATTE)
   option(DOWNLOAD_LATTE "Download latte (instead of using the system's one)" OFF)
   if(DOWNLOAD_LATTE)
-    if (CMAKE_VERSION VERSION_LESS "3.7") # due to SOURCE_SUBDIR 
+    if (CMAKE_VERSION VERSION_LESS "3.7") # due to SOURCE_SUBDIR
       message(FATAL_ERROR "For downlading LATTE you need at least cmake-3.7")
     endif()
     message(STATUS "LATTE not found - we will build our own")
@@ -481,15 +485,15 @@ if(PKG_USER-SCAFACOS)
     ExternalProject_Add(scafacos_build
       URL https://github.com/scafacos/scafacos/releases/download/v1.0.1/scafacos-1.0.1.tar.gz
       URL_MD5 bd46d74e3296bd8a444d731bb10c1738
-      CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> 
-                                               --disable-doc 
+      CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix=<INSTALL_DIR>
+                                               --disable-doc
                                                --enable-fcs-solvers=fmm,p2nfft,direct,ewald,p3m
                                                --with-internal-fftw
                                                --with-internal-pfft
                                                --with-internal-pnfft
-                                               $<$<BOOL:${BUILD_SHARED_LIBS}>:--with-pic>                                               
-                                               FC=${CMAKE_MPI_Fortran_COMPILER} 
-                                               CXX=${CMAKE_MPI_CXX_COMPILER} 
+                                               $<$<BOOL:${BUILD_SHARED_LIBS}>:--with-pic>
+                                               FC=${CMAKE_MPI_Fortran_COMPILER}
+                                               CXX=${CMAKE_MPI_CXX_COMPILER}
                                                CC=${CMAKE_MPI_C_COMPILER}
                                                F77=
       )
@@ -543,7 +547,7 @@ if(PKG_USER-SMD)
   if(DOWNLOAD_EIGEN3)
     include(ExternalProject)
     ExternalProject_Add(Eigen3_build
-      URL http://bitbucket.org/eigen/eigen/get/3.3.4.tar.gz 
+      URL http://bitbucket.org/eigen/eigen/get/3.3.4.tar.gz
       URL_MD5 1a47e78efe365a97de0c022d127607c3
       CONFIGURE_COMMAND "" BUILD_COMMAND "" INSTALL_COMMAND ""
     )
@@ -582,25 +586,31 @@ endif()
 if(PKG_KIM)
   option(DOWNLOAD_KIM "Download kim-api (instead of using the system's one)" OFF)
   if(DOWNLOAD_KIM)
+    enable_language(C)
+    enable_language(Fortran)
     include(ExternalProject)
     ExternalProject_Add(kim_build
-      URL https://github.com/openkim/kim-api/archive/v1.9.5.tar.gz
-      URL_MD5 9f66efc128da33039e30659f36fc6d00
-      BUILD_IN_SOURCE 1
-      CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix=<INSTALL_DIR>
+      URL https://s3.openkim.org/kim-api/kim-api-v2.0.0-beta.2.txz
+      URL_MD5 1fbdbb734059cf0dc9d807e6dd6cc8ea
+      BINARY_DIR build
+      CMAKE_ARGS -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                 -DCMAKE_Fortran_COMPILER=${CMAKE_Fortran_COMPILER}
+                 -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+                 -DCMAKE_BUILD_TYPE=Release
       )
     ExternalProject_get_property(kim_build INSTALL_DIR)
-    set(KIM_INCLUDE_DIRS ${INSTALL_DIR}/include/kim-api-v1)
-    set(KIM_LIBRARIES ${INSTALL_DIR}/lib/libkim-api-v1.so)
+    set(KIM-API-V2_INCLUDE_DIRS ${INSTALL_DIR}/include/kim-api-v2)
+    set(KIM-API-V2_LIBRARIES ${INSTALL_DIR}/lib/libkim-api-v2.2${CMAKE_SHARED_LIBRARY_SUFFIX})
     list(APPEND LAMMPS_DEPS kim_build)
   else()
-    find_package(KIM)
-    if(NOT KIM_FOUND)
-      message(FATAL_ERROR "KIM not found, help CMake to find it by setting KIM_LIBRARY and KIM_INCLUDE_DIR, or set DOWNLOAD_KIM=ON to download it")
+    find_package(KIM-API-V2)
+    if(NOT KIM-API-V2_FOUND)
+      message(FATAL_ERROR "KIM not found, help CMake to find it by setting PKG_CONFIG_PATH, or set DOWNLOAD_KIM=ON to download it")
     endif()
   endif()
-  list(APPEND LAMMPS_LINK_LIBS ${KIM_LIBRARIES})
-  include_directories(${KIM_INCLUDE_DIRS})
+  list(APPEND LAMMPS_LINK_LIBS "${KIM-API-V2_LDFLAGS}")
+  include_directories(${KIM-API-V2_INCLUDE_DIRS})
 endif()
 
 if(PKG_MESSAGE)
@@ -641,7 +651,7 @@ if(PKG_MSCG)
   find_package(GSL REQUIRED)
   option(DOWNLOAD_MSCG "Download latte (instead of using the system's one)" OFF)
   if(DOWNLOAD_MSCG)
-    if (CMAKE_VERSION VERSION_LESS "3.7") # due to SOURCE_SUBDIR 
+    if (CMAKE_VERSION VERSION_LESS "3.7") # due to SOURCE_SUBDIR
       message(FATAL_ERROR "For downlading LATTE you need at least cmake-3.7")
     endif()
     include(ExternalProject)
@@ -1016,7 +1026,7 @@ if(PKG_USER-INTEL)
 endif()
 
 if(PKG_GPU)
-    if (CMAKE_VERSION VERSION_LESS "3.1") 
+    if (CMAKE_VERSION VERSION_LESS "3.1")
       message(FATAL_ERROR "For the GPU package you need at least cmake-3.1")
     endif()
     set(GPU_SOURCES_DIR ${LAMMPS_SOURCE_DIR}/GPU)
@@ -1164,7 +1174,6 @@ set(LAMMPS_STYLE_HEADERS_DIR ${CMAKE_CURRENT_BINARY_DIR}/styles)
 
 GenerateStyleHeaders(${LAMMPS_STYLE_HEADERS_DIR})
 
-include_directories(${LAMMPS_SOURCE_DIR})
 include_directories(${LAMMPS_STYLE_HEADERS_DIR})
 
 ######################################
@@ -1221,7 +1230,7 @@ if(BUILD_EXE)
       add_dependencies(lmp ${LAMMPS_DEPS})
     endif()
   endif()
-  
+
   set_target_properties(lmp PROPERTIES OUTPUT_NAME ${LAMMPS_BINARY})
   install(TARGETS lmp DESTINATION ${CMAKE_INSTALL_BINDIR})
   install(FILES ${LAMMPS_DOC_DIR}/lammps.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1 RENAME ${LAMMPS_BINARY}.1)
@@ -1358,14 +1367,14 @@ message(STATUS "<<< Build configuration >>>
 get_property(LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)
 list (FIND LANGUAGES "Fortran" _index)
 if (${_index} GREATER -1)
-  message(STATUS "Fortran Compiler ${CMAKE_Fortran_COMPILER} 
+  message(STATUS "Fortran Compiler ${CMAKE_Fortran_COMPILER}
            Type     ${CMAKE_Fortran_COMPILER_ID}
            Version  ${CMAKE_Fortran_COMPILER_VERSION}
    Fortran Flags    ${CMAKE_Fortran_FLAGS} ${CMAKE_Fortran_FLAGS_${BTYPE}}")
 endif()
 list (FIND LANGUAGES "C" _index)
 if (${_index} GREATER -1)
-  message(STATUS "C Compiler ${CMAKE_C_COMPILER} 
+  message(STATUS "C Compiler ${CMAKE_C_COMPILER}
      Type     ${CMAKE_C_COMPILER_ID}
      Version  ${CMAKE_C_COMPILER_VERSION}
      C Flags  ${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${BTYPE}}")
