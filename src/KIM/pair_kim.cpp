@@ -104,7 +104,8 @@ PairKIM::PairKIM(LAMMPS *lmp) :
    kim_particleSpecies(NULL),
    kim_particleContributing(NULL),
    lmps_stripped_neigh_list(NULL),
-   lmps_stripped_neigh_ptr(NULL)
+   lmps_stripped_neigh_ptr(NULL),
+   lmps_force_tmp(NULL)
 {
    // Initialize Pair data members to appropriate values
    single_enable = 0;  // We do not provide the Single() function
@@ -147,6 +148,7 @@ PairKIM::~PairKIM()
    memory->destroy(kim_particleSpecies);
    memory->destroy(kim_particleContributing);
    memory->destroy(lmps_stripped_neigh_list);
+   memory->destroy(lmps_force_tmp);
    // clean up lmps_stripped_neigh_ptr
    if (lmps_stripped_neigh_ptr)
    {
@@ -201,6 +203,7 @@ void PairKIM::compute(int eflag , int vflag)
    if (atom->nmax > lmps_maxalloc) {
       memory->destroy(kim_particleSpecies);
       memory->destroy(kim_particleContributing);
+      memory->destroy(lmps_force_tmp);
 
       lmps_maxalloc = atom->nmax;
       memory->create(kim_particleSpecies,lmps_maxalloc,
@@ -218,6 +221,7 @@ void PairKIM::compute(int eflag , int vflag)
         error->all(
             FLERR,
             "Unable to set KIM particle species codes and/or contributing");
+      memory->create(lmps_force_tmp,lmps_maxalloc,3,"pair:lmps_force_tmp");
    }
 
    // kim_particleSpecies = KIM atom species for each LAMMPS atom
@@ -254,6 +258,16 @@ void PairKIM::compute(int eflag , int vflag)
    if (!lmps_using_newton)
    {
      comm->reverse_comm_pair(this);
+   }
+
+   // sum lmps_force_tmp to f if running in hybrid mode
+   if (lmps_hybrid) {
+     double **f = atom->f;
+     for (int i = 0; i < nall; i++) {
+       f[i][0] += lmps_force_tmp[i][0];
+       f[i][1] += lmps_force_tmp[i][1];
+       f[i][2] += lmps_force_tmp[i][2];
+     }
    }
 
    if ((vflag_atom) &&
@@ -318,8 +332,8 @@ void PairKIM::settings(int narg, char **arg)
        error->all(FLERR,"'KIMvirial' or 'LAMMPSvirial' not supported with "
                   "kim-api-v2.");
      }
-     else
-       error->all(FLERR,"Illegal pair_style command");
+     //else
+     //  error->all(FLERR,"Illegal pair_style command");
    }
    // arg[0] is the KIM Model name
 
@@ -403,6 +417,12 @@ void PairKIM::coeff(int narg, char **arg)
    // errors will be detected by below
    lmps_num_unique_elements = 0;
    for (i = 2; i < narg; i++) {
+     if (strcmp(arg[i],"NULL") == 0) {
+       if (!lmps_hybrid)
+         error->all(FLERR,"Invalid args for non-hybrid pair coefficients");
+       lmps_map_species_to_unique[i-1] = -1;
+       continue;
+     }
      for (j = 0; j < lmps_num_unique_elements; j++)
        if (strcmp(arg[i],lmps_unique_elements[j]) == 0) break;
      lmps_map_species_to_unique[i-1] = j;
@@ -550,7 +570,8 @@ int PairKIM::pack_reverse_comm(int n, int first, double *buf)
 {
    int i,m,last;
    double *fp;
-   fp = &(atom->f[0][0]);
+   if (lmps_hybrid) fp = &(lmps_force_tmp[0][0]);
+   else fp = &(atom->f[0][0]);
 
    m = 0;
    last = first + n;
@@ -620,7 +641,8 @@ void PairKIM::unpack_reverse_comm(int n, int *list, double *buf)
 {
    int i,j,m;
    double *fp;
-   fp = &(atom->f[0][0]);
+   if (lmps_hybrid) fp = &(lmps_force_tmp[0][0]);
+   else fp = &(atom->f[0][0]);
 
    m = 0;
    if (KIM_SupportStatus_NotEqual(kim_model_support_for_forces,
@@ -886,7 +908,11 @@ void PairKIM::set_argument_pointers()
   }
   else
   {
-    kimerror = kimerror || KIM_ComputeArguments_SetArgumentPointerDouble(
+    if (lmps_hybrid)
+      kimerror = kimerror || KIM_ComputeArguments_SetArgumentPointerDouble(
+        pargs, KIM_COMPUTE_ARGUMENT_NAME_partialForces, &(lmps_force_tmp[0][0]));
+    else
+      kimerror = kimerror || KIM_ComputeArguments_SetArgumentPointerDouble(
         pargs, KIM_COMPUTE_ARGUMENT_NAME_partialForces, &(atom->f[0][0]));
   }
 
@@ -935,10 +961,7 @@ void PairKIM::set_lmps_flags()
    lmps_using_newton = (force->newton_pair == 1);
 
    // determine if running with pair hybrid
-   if (force->pair_match("hybrid",0))
-   {
-     error->all(FLERR,"pair_kim does not support hybrid");
-   }
+   lmps_hybrid = (force->pair_match("hybrid",0));
 
    // determine unit system and set lmps_units flag
    if ((strcmp(update->unit_style,"real")==0)) {
